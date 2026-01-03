@@ -7,27 +7,19 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 // Process and clean the database URL for Neon pooler compatibility
-// This function processes the DATABASE_URL and sets it back to process.env
-// PrismaClient reads from process.env.DATABASE_URL automatically
 function processDatabaseUrl(): string | undefined {
   const url = process.env.DATABASE_URL;
   
-  // During build time, DATABASE_URL might not be set - that's okay
-  // It will be available at runtime in Vercel
   if (!url) {
-    // In development/build, return undefined and let Prisma handle it
     if (process.env.NODE_ENV === "production" && typeof window === "undefined") {
-      // Only warn in production server-side (not during build)
-      console.warn("DATABASE_URL environment variable is not set");
+      console.warn("⚠️ DATABASE_URL environment variable is not set");
     }
     return undefined;
   }
   
-  // For Neon pooler, ensure proper connection string format
-  // Neon pooler works with Prisma, but we need to ensure SSL and proper settings
   let databaseUrl = url.trim();
   
-  // Parse URL to ensure proper formatting
+  // Parse and clean the URL
   try {
     const urlObj = new URL(databaseUrl);
     
@@ -36,94 +28,89 @@ function processDatabaseUrl(): string | undefined {
       urlObj.searchParams.set('sslmode', 'require');
     }
     
-    // Remove channel_binding parameter if present - it's not standard and may cause issues
-    // Prisma/PostgreSQL drivers may not support this parameter
+    // Remove channel_binding parameter - not supported by Prisma/pg
     if (urlObj.searchParams.has('channel_binding')) {
       urlObj.searchParams.delete('channel_binding');
     }
     
-    // For Neon pooler with Prisma, we don't need additional parameters
-    // Prisma handles connection pooling automatically
     databaseUrl = urlObj.toString();
   } catch (e) {
-    // If URL parsing fails, try to manually remove channel_binding
-    // This is a fallback for malformed URLs
+    // Fallback: manually remove channel_binding if URL parsing fails
     if (databaseUrl.includes('channel_binding')) {
       databaseUrl = databaseUrl
         .replace(/[&?]channel_binding=[^&]*/g, '')
         .replace(/channel_binding=[^&]*&?/g, '');
     }
-    console.warn('Could not parse DATABASE_URL, using fallback cleanup:', e);
+    console.warn('⚠️ Could not parse DATABASE_URL, using fallback cleanup');
   }
   
-  // Set the processed URL back to process.env so PrismaClient can read it
+  // Update process.env with cleaned URL
   process.env.DATABASE_URL = databaseUrl;
   return databaseUrl;
 }
 
 // Prisma Client configuration for serverless environments (Vercel)
-// For Neon, the pooler connection string should work directly with Prisma
-// We use the pg adapter for proper PostgreSQL connection handling
+// For Neon, we use the pg adapter as required by Prisma 7.x
 function createPrismaClient(): PrismaClient {
-  // Process the database URL - this ensures channel_binding is removed and sslmode is set
+  // Process and clean the database URL
   const processedUrl = processDatabaseUrl();
-  
-  // Use the processed URL or fall back to environment variable
   const databaseUrl = processedUrl || process.env.DATABASE_URL;
   
-  // Check if we have a valid database URL
+  // Validate DATABASE_URL
   if (!databaseUrl) {
     console.error("❌ DATABASE_URL is not set. Database operations will fail.");
-    // Still create client for build-time, but it will fail at runtime
     return new PrismaClient({
       log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
     });
   }
   
-  // Validate that we're not using a dummy connection string
   if (databaseUrl.includes("dummy:dummy")) {
-    console.error("❌ DATABASE_URL appears to be a dummy value. Please set a valid database URL.");
+    console.error("❌ DATABASE_URL appears to be a dummy value.");
     return new PrismaClient({
       log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
     });
   }
   
   try {
-    // Create PostgreSQL connection pool with proper configuration for Neon
+    // Create PostgreSQL connection pool optimized for serverless/Neon
     const pool = new Pool({
       connectionString: databaseUrl,
-      // Connection pool settings optimized for serverless
-      max: 1, // Limit connections for serverless (each function instance)
+      max: 1, // Single connection per serverless function instance
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 10000,
-      // SSL is handled via connection string parameters
+      // SSL is configured via connection string (sslmode=require)
     });
     
-    // Create adapter with the pool
+    // Create Prisma adapter with the pool
     const adapter = new PrismaPg(pool);
     
-    // Create PrismaClient with adapter
+    // Create PrismaClient with adapter (required for Prisma 7.x)
     const client = new PrismaClient({
       adapter: adapter,
       log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
     });
     
-    console.log("✅ Prisma Client created successfully with adapter");
+    console.log("✅ Prisma Client initialized with adapter");
     return client;
   } catch (error: any) {
-    console.error("❌ Failed to create Prisma adapter:", error);
+    console.error("❌ Failed to create Prisma client with adapter:", error);
     console.error("Error details:", {
       message: error?.message,
-      stack: error?.stack,
-      databaseUrl: databaseUrl ? `${databaseUrl.substring(0, 20)}...` : "not set",
+      code: error?.code,
+      databaseUrlPresent: !!databaseUrl,
+      databaseUrlPreview: databaseUrl ? `${databaseUrl.substring(0, 30)}...` : "not set",
     });
     
-    // Fallback: create client without adapter (may not work with Prisma 7.x)
-    // This should only happen if there's a configuration issue
-    console.warn("⚠️ Attempting to create PrismaClient without adapter (may fail)");
-    return new PrismaClient({
-      log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
-    });
+    // Fallback: try without adapter (may fail with Prisma 7.x)
+    console.warn("⚠️ Attempting fallback: PrismaClient without adapter");
+    try {
+      return new PrismaClient({
+        log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
+      });
+    } catch (fallbackError: any) {
+      console.error("❌ Fallback also failed:", fallbackError);
+      throw fallbackError;
+    }
   }
 }
 
