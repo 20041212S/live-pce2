@@ -284,42 +284,56 @@ export async function POST(request: NextRequest) {
     
     try {
       // Execute SQL to create all tables
-      // Split by semicolon and execute each statement
-      const statements = CREATE_TABLES_SQL.split(';').filter(s => s.trim().length > 0);
-      
-      const results = [];
+      // Better approach: Execute the entire SQL block, then verify
+      const results: any[] = [];
       let successCount = 0;
       
-      for (const statement of statements) {
-        const trimmed = statement.trim();
-        if (trimmed && !trimmed.startsWith('--')) {
-          try {
-            await prisma.$executeRawUnsafe(trimmed);
+      // Split SQL into logical blocks (separate CREATE TABLE statements)
+      // Handle DO blocks separately as they contain semicolons
+      const sqlBlocks = CREATE_TABLES_SQL
+        .split(/(?=CREATE TABLE|CREATE UNIQUE INDEX|CREATE INDEX|DO \$\$)/)
+        .filter(s => s.trim().length > 0 && !s.trim().startsWith('--'));
+      
+      for (const block of sqlBlocks) {
+        const trimmed = block.trim();
+        if (!trimmed || trimmed.startsWith('--')) continue;
+        
+        // Ensure statement ends with semicolon
+        const statement = trimmed.endsWith(';') ? trimmed : trimmed + ';';
+        
+        try {
+          await prisma.$executeRawUnsafe(statement);
+          successCount++;
+          const preview = statement.substring(0, 100).replace(/\s+/g, ' ');
+          results.push({ 
+            statement: preview, 
+            success: true 
+          });
+          console.log(`✅ Executed: ${preview}`);
+        } catch (err: any) {
+          // Ignore "already exists" errors - these are fine
+          const errorMsg = err.message || String(err) || '';
+          const isAlreadyExists = 
+            errorMsg.includes('already exists') || 
+            errorMsg.includes('duplicate') ||
+            (errorMsg.includes('relation') && errorMsg.includes('already')) ||
+            errorMsg.includes('constraint') && errorMsg.includes('already');
+          
+          if (isAlreadyExists) {
             successCount++;
             results.push({ 
-              statement: trimmed.substring(0, 80).replace(/\s+/g, ' '), 
-              success: true 
+              statement: statement.substring(0, 100).replace(/\s+/g, ' '), 
+              success: true, 
+              note: 'already exists' 
             });
-          } catch (err: any) {
-            // Ignore "already exists" errors - these are fine
-            const errorMsg = err.message || String(err);
-            if (errorMsg.includes('already exists') || 
-                errorMsg.includes('duplicate') ||
-                errorMsg.includes('relation') && errorMsg.includes('already')) {
-              successCount++;
-              results.push({ 
-                statement: trimmed.substring(0, 80).replace(/\s+/g, ' '), 
-                success: true, 
-                note: 'already exists' 
-              });
-            } else {
-              console.warn('Statement error:', errorMsg);
-              results.push({ 
-                statement: trimmed.substring(0, 80).replace(/\s+/g, ' '), 
-                success: false, 
-                error: errorMsg.substring(0, 200) 
-              });
-            }
+            console.log(`ℹ️ Already exists: ${statement.substring(0, 50)}`);
+          } else {
+            console.error(`❌ Error executing statement:`, errorMsg);
+            results.push({ 
+              statement: statement.substring(0, 100).replace(/\s+/g, ' '), 
+              success: false, 
+              error: errorMsg.substring(0, 200) 
+            });
           }
         }
       }
