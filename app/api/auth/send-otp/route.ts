@@ -180,9 +180,6 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // Return detailed error for debugging
-    const errorMessage = error.message || 'Unknown error occurred';
-    
     // Log full error for debugging in Vercel logs
     console.error('Full error object:', JSON.stringify(error, null, 2));
     
@@ -202,7 +199,7 @@ export async function POST(request: NextRequest) {
         error: userFriendlyError,
         // Always include error code and message for debugging (even in production)
         code: error.code || 'UNKNOWN',
-        message: errorMessage,
+        message: errorMessage || error.message || 'Unknown error occurred',
         type: error.name || 'Error',
         // Include stack trace in development
         ...(process.env.NODE_ENV === 'development' && { 
