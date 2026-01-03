@@ -57,8 +57,20 @@ Create a `.env` file in the root directory:
 DATABASE_URL="postgresql://user:password@localhost:5432/campus_assistant"
 JWT_SECRET="your-secret-key-change-in-production"
 GROQ_API_KEY="your-groq-api-key"
+SMTP_USER="your-email@gmail.com"
+SMTP_PASS="your-gmail-app-password"
 # OPENAI_API_KEY is NOT required - voice features use free browser APIs!
 ```
+
+**For Gmail SMTP Setup (Required for OTP emails):**
+1. Enable 2-Step Verification: https://myaccount.google.com/security
+2. Generate App Password: https://myaccount.google.com/apppasswords
+3. Select "Mail" and "Other (Custom name)" → Enter "PCE Campus Assistant"
+4. Copy the 16-character App Password (remove spaces)
+5. Use this App Password as `SMTP_PASS` (NOT your regular Gmail password)
+
+**For Vercel Deployment:**
+Add all environment variables in Vercel Dashboard → Your Project → Settings → Environment Variables
 
 4. Set up the database:
 ```bash

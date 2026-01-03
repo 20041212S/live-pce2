@@ -196,15 +196,25 @@ export async function sendOTPEmail(to: string, otp: string, subject?: string): P
     let errorMessage = `Failed to send OTP email: ${error.message}`;
     
     if (error.message.includes('Invalid login') || error.message.includes('BadCredentials') || error.message.includes('535')) {
-      errorMessage = `SMTP Authentication Failed: Please check your Gmail credentials in .env file.\n\n` +
+      const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
+      const envLocation = isVercel ? 'Vercel Environment Variables' : '.env file';
+      const setupSteps = isVercel 
+        ? `5. Go to Vercel Dashboard → Your Project → Settings → Environment Variables\n` +
+          `6. Add these variables:\n` +
+          `   - SMTP_USER = your-email@gmail.com\n` +
+          `   - SMTP_PASS = your-16-character-app-password\n` +
+          `7. Redeploy your application (or wait for auto-deploy)\n`
+        : `5. Update .env: SMTP_USER=your-email@gmail.com, SMTP_PASS=your-app-password\n` +
+          `6. Restart the server after updating .env\n`;
+      
+      errorMessage = `SMTP Authentication Failed: Please check your Gmail credentials in ${envLocation}.\n\n` +
         `For Gmail:\n` +
         `1. Enable 2-Step Verification: https://myaccount.google.com/security\n` +
         `2. Generate App Password: https://myaccount.google.com/apppasswords\n` +
         `3. Select "Mail" and "Other (Custom name)" → Enter "PCE Campus Assistant"\n` +
         `4. Copy the 16-character App Password (remove spaces)\n` +
-        `5. Update .env: SMTP_USER=your-email@gmail.com, SMTP_PASS=your-app-password\n` +
-        `6. Restart the server after updating .env\n\n` +
-        `Important: Use App Password, NOT your regular Gmail password!`;
+        setupSteps +
+        `\nImportant: Use App Password, NOT your regular Gmail password!`;
     } else if (error.message.includes('ECONNREFUSED') || error.message.includes('timeout')) {
       errorMessage = `SMTP Connection Failed: Check your internet connection and SMTP settings.\n` +
         `Verify SMTP_HOST and SMTP_PORT in .env file.`;
